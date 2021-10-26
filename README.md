@@ -8,4 +8,4 @@ Requiremens:
   *  average pressure
   *  cylinder volume
 
-Then, the IMEP/p_me  is calculated as  <img src="https://render.githubusercontent.com/render/math?math=p_me=\int_0^720p\,dV/> and written to the results folder as a summary/KPI result
+Then, the IMEP/p_me  is calculated as  ![formula]<img src="https://render.githubusercontent.com/render/math?math=p_me=\int_0^720p\,dV/> and written to the results folder as a summary/KPI result
