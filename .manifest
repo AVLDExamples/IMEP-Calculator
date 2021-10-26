@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<app>
+  <name>IMEP Calculator</name>
+  <category>FIRE™ Apps</category>
+  <icon_id>ai-workflow-app</icon_id>
+  <scalable_icon>workflow/app.svg</scalable_icon>
+  <help_key></help_key>
+  <hidden>False</hidden>
+  <dependencies>
+    <product_name>FIRE M</product_name>
+  </dependencies>
+  <uuid>d92d2573011446b2942517ea18d58d40</uuid>
+  <client_tags>
+    <client_tag>FIRE</client_tag>
+  </client_tags>
+  <custom_data/>
+  <use_sandbox>True</use_sandbox>
+  <python_exec>avl-standard-python2</python_exec>
+  <libraries/>
+</app>
