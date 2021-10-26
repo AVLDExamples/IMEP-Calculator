@@ -1,5 +1,5 @@
 # IMEP-Calculator
-Example project to calculate IMEP from an AVL FIRE&amp;tm; full cylinder 4-stoke ICE engine simulation
+Example project to calculate IMEP from an AVL FIRE&amp;trade; full cylinder 4-stoke ICE engine simulation
 
 Requiremens:
 * AVL FIRE M R2021.1 or later (obviously)
