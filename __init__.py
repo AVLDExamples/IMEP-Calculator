@@ -1,6 +1,15 @@
 from base64 import encode
+import re
 from matplotlib.pyplot import title
 from asi import log_info, active_model, current_case, current_caseset, current_project_location, current_project, log_error
+import asi.ui
+from asi.ui import CompositeEditor
+from asi.ui import BoolEditor
+from asi.ui import FormDesc
+from asi.ui import ButtonForm
+from asi.ui import AmountEditor
+from asi.ui import IntEditor
+from asi.ui import StringEditor
 import os
 import os.path
 import sdt.results
@@ -27,6 +36,8 @@ def calc_MFBS(summary_folder, acc_hr_channel, is_acchr):
     
     mfb = np.interp( (0.05,0.1,0.5,0.9,0.95), sum_hr, deg_ca)
     names = ("MFB05", "MFB10", "MFB50", "MFB90", "MFB95")
+    formatted_mfbs = ["{:.2f}".format(x) for x in mfb]
+
 
     for i in range(5):
         CA = "{:.2f}".format(mfb[i])
@@ -35,7 +46,7 @@ def calc_MFBS(summary_folder, acc_hr_channel, is_acchr):
         add_or_update_value(folder=summary_folder, name=name, value=CA,unit="angle~deg")
 
 
-def calc_IMEP(summary_folder, volume_channel, pressure_channel, segments, V_h, rot_speed):
+def calc_IMEP(volume_channel, pressure_channel, segments, V_h, rot_speed):
     volume = volume_channel.values
     pressure =pressure_channel.values
 
@@ -60,32 +71,125 @@ def calc_IMEP(summary_folder, volume_channel, pressure_channel, segments, V_h, r
         log_info("Start_angle {0} - End_angle {1}".format(start_angle, end_angle))
         log_info("Range {0}".format(sel_range))
 
+    PFP = np.max(pressure[1])*1e-5
+
     power = IMEP*V_h*rot_speed/4./pi*1e2
     log_info("IMEP  :{:.2f}bar".format(IMEP))
     log_info("Power :{:.2f}kW".format(power))
-    add_or_update_value(folder=summary_folder, name="IMEP",value=IMEP,unit="pressure~bar")
-    add_or_update_value(folder=summary_folder, name="Power",value=power,unit="power~kW")
+    log_info("PFP   :{:.2f}bar".format(PFP))
+#    add_or_update_value(folder=summary_folder, name="IMEP",value=IMEP,unit="pressure~bar")
+#    add_or_update_value(folder=summary_folder, name="Power",value=power,unit="power~kW")
 
-    return IMEP, power
+    return IMEP, power, PFP
 
 def add_or_update_value(folder=None, name="VALUE", unit="length~mm", value=1., data_type="DOUBLE" ):
+#update does not work until now - the last value will be accessed!
+    folder.insert_single_value( name=name, title=name, value=str(value), data_type=data_type, unit_str=unit)
 
-    cand = [n for n in folder.single_values if n.name==name]
+#    cand = [n for n in folder.single_values if n.name==name]
 
-    log_info(cand)
-    if len(cand)==0:
-        folder.insert_single_value( name=name, title=name, value=str(value), data_type=data_type, unit_str=unit)
-    else:
-        log_info("Update!")
-        node = cand[0]
-        node.name = name
-        node.title = name
-        node.value=str(value)
-        node.data_type=data_type
-        node.unit_group, node.unit = unit.split("~")
+#   log_info(cand)
+#    if len(cand)==0:
+#    else:
+#        log_info("Update!")
+#        node = cand[0]
+#        log_info(dir(node))
+#        node.name = name
+#        node.title = name
+#        node.value=str(value)
+#        node.data_type=data_type
+#        node.unit_group, node.unit = unit.split("~")
+
+def _guess_channels(button, app, run_context):
+    log_info("guess channels")
+    model = active_model()
+    ggpr = None
+    domain = None
+    comb=None
+    for dom in model.domains:
+        try:
+            ggpr = dom["Modules"]["General Gas Phase Reaction"]
+            domain = dom
+            log_info(domain.name)
+        except:
+            pass
+        try:
+            comb = dom["Modules"]["Combustion"]
+            domain = dom
+            log_info(domain.name)
+        except:
+            pass
+
+    if domain is not None:
+        domname = domain.name.replace(" ","_")
+        segment = False
+        result_selection = None
+        cands = [ x for x in domain["Output"]["2D Results"].children if "CYLINDER" in x.name.upper()]
+        if len(cands) == 0:
+            log_info("Segment simulation")
+            segment = True
+            result_selection = ""
+
+        else:
+            result_selection = cands[0].name +"/"
+        
+        app.model.press_channel = r"/{0}/2D_Results/{1}Mean Absolute Pressure".format(domname,result_selection)
+        log_info(app.model.press_channel)
+        app.model.vol_channel = r"/{0}/2D_Results/{1}Total Volume".format(domname,result_selection)
+        log_info(app.model.vol_channel)
+        app.emis.mass_channel = r"/{0}/2D_Results/{1}Total Mass".format(domname,result_selection)
+        log_info(app.emis.mass_channel)
+
+        if segment:
+            if comb is not None:
+                log_info("Segment/ECFM3Z")
+                app.model.is_acchr=True
+                app.model.acchr_channel = r"/{0}/2D_Results/Comb/Accumulated Heat Release".format(domname)
+                log_info(app.model.acchr_channel)
+                app.emis.nox_channel = r"/{0}/2D_Results/Emis/Mean NO Mass Fraction".format(domname)
+                log_info(app.emis.nox_channel)
+                app.emis.soot_channel = r"/{0}/2D_Results/Emis/Mean Soot Mass Fraction".format(domname)
+                log_info(app.emis.soot_channel)
+            else:
+                log_info("Segment/GGPR")
+                app.model.is_acchr=False
+        else:
+            if comb is not None:
+                log_info("Cylinder/ECFM3Z")
+                app.model.is_acchr=True
+            else:
+                log_info("Cylinder/GGPR")
+                app.model.is_acchr=False
+
+
+def _make_editor():
+    editor = CompositeEditor(layout = [
+            FormDesc('bore', AmountEditor()  ),
+            FormDesc('stroke', AmountEditor()),
+            FormDesc('engine_speed', AmountEditor()),
+            FormDesc('segments', IntEditor()),
+            FormDesc('button', ButtonForm('Guess channel names', width=250, action_callback=_guess_channels)),
+            FormDesc('press_channel', StringEditor()),
+            FormDesc('vol_channel', StringEditor()),
+            FormDesc('is_acchr', BoolEditor()),
+            FormDesc('acchr_channel', StringEditor()),
+        ]
+    )
+    return editor
+
+def _make_emi_editor():
+    editor = CompositeEditor(
+        layout = [
+            FormDesc('nox_channel', StringEditor()),
+            FormDesc('soot_channel', StringEditor()),
+            FormDesc('mass_channel', StringEditor()),
+        ]
+    )
+    return editor
+
 
 def define_app(app_desc):
-    props = app_desc.def_prop("model", pretty_name="Settings")
+    props = app_desc.def_prop("model", pretty_name="Settings", editor_factory=_make_editor)
 
     props.def_slot("bore", (80, "length~mm"), pretty_name="Bore", parameterizable=True, tooltip="for calculation of V<sub>h</sub>")
     props.def_slot("stroke", (80, "length~mm"), pretty_name="Stroke", parameterizable=True,tooltip="for calculation of V<sub>h</sub>")
@@ -103,7 +207,7 @@ def define_app(app_desc):
     props.def_slot("is_acchr", True, pretty_name="accumulated HR?", parameterizable=True, tooltip="Please check if the channel is already an accumulated heat release channel. If the channel displays rate of heat release, uncheck this.")
     props.def_slot("acchr_channel", r"/Combustion_Domain/2D_Results/Comb/Accumulated Heat Release", pretty_name="Channel path for heat release", parameterizable=True, tooltip=TT_Channelname)
 
-    props = app_desc.def_prop("emis", pretty_name="Emissions")
+    props = app_desc.def_prop("emis", pretty_name="Emissions", editor_factory=_make_emi_editor)
     props.def_slot("nox_channel", r"/Combustion_Domain/2D_Results/Emis/Mean NO Mass Fraction", pretty_name="Channel path for NO mass fraction", parameterizable=True)
     props.def_slot("soot_channel", r"/Combustion_Domain/2D_Results/Emis/Mean Soot Mass Fraction", pretty_name="Channel path for soot mass fraction", parameterizable=True)
     props.def_slot("mass_channel", r"/Combustion_Domain/2D_Results/Total Mass", pretty_name="Channel path for cylinder mass", parameterizable=True)
@@ -179,6 +283,7 @@ def run_app(app):
             return
 
 
+    #rootfolder.remove_summary_data()
     summary_root = rootfolder.summary_folder
     if summary_root is None:
         summary_root = rootfolder.insert_summary_folder(name="Summary")
@@ -189,9 +294,17 @@ def run_app(app):
     else:
         summary_folder = folder_candidates[0]
     try:
-        IMEP, power = calc_IMEP(summary_folder,volume_channel, pressure_channel, app.model.segments, V_h, app.model.engine_speed)
+        IMEP, power, PFP = calc_IMEP(volume_channel, pressure_channel, app.model.segments, V_h, app.model.engine_speed)
     except Exception as exception:
         log_error("Could not calculate IMEP")
+        log_error(exception)
+
+    try:
+        add_or_update_value(folder=summary_folder, name="IMEP",value=IMEP,unit="pressure~bar")
+        add_or_update_value(folder=summary_folder, name="Power",value=power,unit="power~kW")
+        add_or_update_value(folder=summary_folder, name="PFP", value=PFP,unit="pressure~bar")
+    except Exception as exception:
+        log_error("Could not write IMEP to results")
         log_error(exception)
 
     try:
