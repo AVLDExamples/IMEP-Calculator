@@ -53,7 +53,9 @@ def calc_IMEP(volume_channel, pressure_channel, segments, V_h, rot_speed):
     start_angle = np.min(volume[0])
     end_angle = np.max(volume[0])
 
-    if end_angle - start_angle >=720.:
+    log_info("Start_angle {0} - End_angle {1} = {2}".format(start_angle, end_angle, end_angle-start_angle))
+    if end_angle - start_angle >=718.:
+        log_info("Range assumed as full cycle.")
         phi = np.arange(0,720,0.1)
         p = np.interp(phi, pressure[0], pressure[1],period=720)
         V = np.interp(phi, volume[0], volume[1], period=720)
@@ -68,7 +70,7 @@ def calc_IMEP(volume_channel, pressure_channel, segments, V_h, rot_speed):
         V = np.interp(phi, volume[0], volume[1])
 
         IMEP = segments * np.trapz(p,V) / V_h*1e-5
-        log_info("Start_angle {0} - End_angle {1}".format(start_angle, end_angle))
+        log_info("Only high pressure part considered.")
         log_info("Range {0}".format(sel_range))
 
     PFP = np.max(pressure[1])*1e-5
