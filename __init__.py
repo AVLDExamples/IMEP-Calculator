@@ -1,7 +1,7 @@
 from base64 import encode
 import re
 from matplotlib.pyplot import title
-from asi import log_info, active_model, current_case, current_caseset, current_project_location, current_project, log_error
+from asi import log_info, log_error, active_model
 import asi.ui
 from asi.ui import CompositeEditor
 from asi.ui import BoolEditor
@@ -46,16 +46,14 @@ def calc_MFBS(summary_folder, acc_hr_channel, is_acchr):
         add_or_update_value(folder=summary_folder, name=name, value=CA,unit="angle~deg")
 
 
-def calc_IMEP(volume_channel, pressure_channel, segments, V_h, rot_speed):
+def calc_IMEP(summary_folder, volume_channel, pressure_channel, segments, V_h, rot_speed):
     volume = volume_channel.values
     pressure =pressure_channel.values
 
     start_angle = np.min(volume[0])
     end_angle = np.max(volume[0])
 
-    log_info("Start_angle {0} - End_angle {1} = {2}".format(start_angle, end_angle, end_angle-start_angle))
-    if end_angle - start_angle >=718.:
-        log_info("Range assumed as full cycle.")
+    if end_angle - start_angle >=720.:
         phi = np.arange(0,720,0.1)
         p = np.interp(phi, pressure[0], pressure[1],period=720)
         V = np.interp(phi, volume[0], volume[1], period=720)
@@ -70,37 +68,33 @@ def calc_IMEP(volume_channel, pressure_channel, segments, V_h, rot_speed):
         V = np.interp(phi, volume[0], volume[1])
 
         IMEP = segments * np.trapz(p,V) / V_h*1e-5
-        log_info("Only high pressure part considered.")
+        log_info("Start_angle {0} - End_angle {1}".format(start_angle, end_angle))
         log_info("Range {0}".format(sel_range))
-
-    PFP = np.max(pressure[1])*1e-5
 
     power = IMEP*V_h*rot_speed/4./pi*1e2
     log_info("IMEP  :{:.2f}bar".format(IMEP))
     log_info("Power :{:.2f}kW".format(power))
-    log_info("PFP   :{:.2f}bar".format(PFP))
 #    add_or_update_value(folder=summary_folder, name="IMEP",value=IMEP,unit="pressure~bar")
 #    add_or_update_value(folder=summary_folder, name="Power",value=power,unit="power~kW")
 
-    return IMEP, power, PFP
+    return IMEP, power
 
 def add_or_update_value(folder=None, name="VALUE", unit="length~mm", value=1., data_type="DOUBLE" ):
-#update does not work until now - the last value will be accessed!
-    folder.insert_single_value( name=name, title=name, value=str(value), data_type=data_type, unit_str=unit)
 
-#    cand = [n for n in folder.single_values if n.name==name]
+    cand = [n for n in folder.single_values if n.name==name]
 
-#   log_info(cand)
-#    if len(cand)==0:
-#    else:
-#        log_info("Update!")
-#        node = cand[0]
-#        log_info(dir(node))
-#        node.name = name
-#        node.title = name
-#        node.value=str(value)
-#        node.data_type=data_type
-#        node.unit_group, node.unit = unit.split("~")
+    log_info(cand)
+    if len(cand)==0:
+        folder.insert_single_value( name=name, title=name, value=str(value), data_type=data_type, unit_str=unit)
+    else:
+        log_info("Update!")
+        node = cand[0]
+        log_info(dir(node))
+        node.name = name
+        node.title = name
+        node.value=str(value)
+        node.data_type=data_type
+        node.unit_group, node.unit = unit.split("~")
 
 def _guess_channels(button, app, run_context):
     log_info("guess channels")
@@ -182,6 +176,7 @@ def _make_editor():
 def _make_emi_editor():
     editor = CompositeEditor(
         layout = [
+            FormDesc( 'calc_emis', BoolEditor() ),
             FormDesc('nox_channel', StringEditor()),
             FormDesc('soot_channel', StringEditor()),
             FormDesc('mass_channel', StringEditor()),
@@ -200,7 +195,7 @@ def define_app(app_desc):
 #    props.def_slot("search_channels", False, pretty_name="Search for pressure/volume channel in")
 #    props.def_slot("prefix", "INI_Cylinder")
     props.def_slot("press_channel", 
-        r"/Combustion_Domain/2D_Results/INI_Cylinder/Mean Pressure", 
+        r"/Combustion_Domain/2D_Results/INI_Cylinder/Mean Absolute Pressure", 
         pretty_name="Channel path for Pressure trace", 
         parameterizable=True,
         tooltip=TT_Channelname
@@ -210,6 +205,7 @@ def define_app(app_desc):
     props.def_slot("acchr_channel", r"/Combustion_Domain/2D_Results/Comb/Accumulated Heat Release", pretty_name="Channel path for heat release", parameterizable=True, tooltip=TT_Channelname)
 
     props = app_desc.def_prop("emis", pretty_name="Emissions", editor_factory=_make_emi_editor)
+    props.def_slot("calc_emis", True, pretty_name="Get emission values")
     props.def_slot("nox_channel", r"/Combustion_Domain/2D_Results/Emis/Mean NO Mass Fraction", pretty_name="Channel path for NO mass fraction", parameterizable=True)
     props.def_slot("soot_channel", r"/Combustion_Domain/2D_Results/Emis/Mean Soot Mass Fraction", pretty_name="Channel path for soot mass fraction", parameterizable=True)
     props.def_slot("mass_channel", r"/Combustion_Domain/2D_Results/Total Mass", pretty_name="Channel path for cylinder mass", parameterizable=True)
@@ -217,12 +213,12 @@ def define_app(app_desc):
 def run_app(app):
     #Check for this prefix
     #get project and "environment"
-    proj = current_project()
+    proj = app.current_project()
     projdir = os.path.dirname(proj.filename)
     projname, ext = os.path.splitext(os.path.basename(proj.filename))
     modelname = active_model().name
-    casesetname = current_caseset()
-    casename = current_case()    
+    casesetname = app.current_caseset()
+    casename = app.current_case()    
 
     #get available channels    
     address = {
@@ -271,12 +267,21 @@ def run_app(app):
     else:
         try:
             address["channel_path"] = app.model.press_channel
+            allchan = sdt.results.get_channels(**address)
+            if len(allchan)==0:
+                log_error(f"pressure channel does not exist -> is it spelled correctly? {app.model.press_channel}")
+                return
+
             pressure_channel = sdt.results.get_channel(**address)
             rootfolder=pressure_channel
             while not rootfolder.type=="CASE":
                 rootfolder=rootfolder.parent
-            pressure_channel = pressure_channel        
             address["channel_path"] = app.model.vol_channel
+
+            allchan = sdt.results.get_channels(**address)
+            if len(allchan)==0:
+                log_error(f"volume channel does not exist -> is it spelled correctly? {app.model.vol_channel}")
+                return
             volume_channel = sdt.results.get_channel(**address)
 
         except Exception as exception:
@@ -285,7 +290,7 @@ def run_app(app):
             return
 
 
-    #rootfolder.remove_summary_data()
+    rootfolder.remove_summary_data()
     summary_root = rootfolder.summary_folder
     if summary_root is None:
         summary_root = rootfolder.insert_summary_folder(name="Summary")
@@ -296,7 +301,7 @@ def run_app(app):
     else:
         summary_folder = folder_candidates[0]
     try:
-        IMEP, power, PFP = calc_IMEP(volume_channel, pressure_channel, app.model.segments, V_h, app.model.engine_speed)
+        IMEP, power = calc_IMEP(summary_folder,volume_channel, pressure_channel, app.model.segments, V_h, app.model.engine_speed)
     except Exception as exception:
         log_error("Could not calculate IMEP")
         log_error(exception)
@@ -304,36 +309,53 @@ def run_app(app):
     try:
         add_or_update_value(folder=summary_folder, name="IMEP",value=IMEP,unit="pressure~bar")
         add_or_update_value(folder=summary_folder, name="Power",value=power,unit="power~kW")
-        add_or_update_value(folder=summary_folder, name="PFP", value=PFP,unit="pressure~bar")
     except Exception as exception:
         log_error("Could not write IMEP to results")
         log_error(exception)
 
     try:
         address["channel_path"] = app.model.acchr_channel
+        allchan = sdt.results.get_channels(**address)
+        if len(allchan)==0:
+            log_error(f"heat release / acc. heat release channel does not exist -> is it spelled correctly? {app.model.acchr_channel}")
+            return
         acc_hr_channel = sdt.results.get_channel(**address)
-        if not acc_hr_channel is None:
-            calc_MFBS(summary_folder, acc_hr_channel,app.model.is_acchr)
+        calc_MFBS(summary_folder, acc_hr_channel,app.model.is_acchr)
     except Exception as exception:
         log_error("Could not access the heat release channel!")
         log_error(exception)
 
-    try:
-        address["channel_path"] = app.emis.nox_channel
-        nox_channel = sdt.results.get_channel(**address)
-        address["channel_path"] = app.emis.soot_channel
-        soot_channel = sdt.results.get_channel(**address)
-        address["channel_path"] = app.emis.mass_channel
-        mass_channel = sdt.results.get_channel(**address)
-        nox_mfr = nox_channel.values[1][-1]
-        soot_mfr = soot_channel.values[1][-1]
-        total_mass = mass_channel.values[1][-1]
+    if app.emis.calc_emis:
+        try:
+            address["channel_path"] = app.emis.nox_channel
+            allchan = sdt.results.get_channels(**address)
+            if len(allchan)==0:
+                log_error(f"NO channel does not exist -> is it spelled correctly? {app.emis.nox_channel}")
+                return
+            nox_channel = sdt.results.get_channel(**address)
 
-        add_or_update_value(folder=summary_folder, name="NOx mass", unit="mass~mg", value=nox_mfr*total_mass*app.model.segments*1e6)
-        add_or_update_value(folder=summary_folder, name="Soot mass", unit="mass~mg", value=soot_mfr*total_mass*app.model.segments*1e6)
-    except Exception as exception:
-        log_error("Could not access the emission channels!")
-        log_error(exception)
+            address["channel_path"] = app.emis.soot_channel
+            allchan = sdt.results.get_channels(**address)
+            if len(allchan)==0:
+                log_error(f"Soot channel does not exist -> is it spelled correctly? {app.emis.soot_channel}")
+                return
+            soot_channel = sdt.results.get_channel(**address)
+
+            address["channel_path"] = app.emis.mass_channel
+            allchan = sdt.results.get_channels(**address)
+            if len(allchan)==0:
+                log_error(f"Cylinder mass channel does not exist -> is it spelled correctly? {app.emis.mass_channel}")
+                return
+            mass_channel = sdt.results.get_channel(**address)
+            nox_mfr = nox_channel.values[1][-1]
+            soot_mfr = soot_channel.values[1][-1]
+            total_mass = mass_channel.values[1][-1]
+
+            add_or_update_value(folder=summary_folder, name="NOx mass", unit="mass~mg", value=nox_mfr*total_mass*app.model.segments*1e6)
+            add_or_update_value(folder=summary_folder, name="Soot mass", unit="mass~mg", value=soot_mfr*total_mass*app.model.segments*1e6)
+        except Exception as exception:
+            log_error("Could not access the emission channels!")
+            log_error(exception)
 
 
     rootfolder.write_tree()
